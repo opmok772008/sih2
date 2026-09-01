@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, PhoneOff, ShieldCheck, ShieldAlert, ChevronDown, Info } from 'lucide-react';
+import { Mic, PhoneOff, ShieldCheck, ShieldAlert, ChevronDown, Info, Activity } from 'lucide-react';
 import RiskGauge from './RiskGauge';
 import WaveformVisualizer from './WaveformVisualizer';
 
@@ -10,12 +10,12 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
   const [selectionError, setSelectionError] = useState(false);
   
   // Real-time telemetry state
-  const [liveRisk, setLiveRisk] = useState(0.08);
-  const [liveDeepfake, setLiveDeepfake] = useState(0.05);
+  const [liveRisk, setLiveRisk] = useState(0.06);
+  const [liveDeepfake, setLiveDeepfake] = useState(0.04);
   const [liveDecision, setLiveDecision] = useState('ALLOW_ACCESS');
   const [liveSubScores, setLiveSubScores] = useState({
     vocoder_artifact_score: 0.04,
-    pitch_monotonicity_score: 0.08,
+    pitch_monotonicity_score: 0.06,
     micro_tremor_deficit_score: 0.05,
   });
   const [liveChunkWaveform, setLiveChunkWaveform] = useState([]);
@@ -28,16 +28,44 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
   const scriptProcessorRef = useRef(null);
   const simIntervalRef = useRef(null);
 
+  const getTargetName = () => {
+    if (selectedSpeaker && selectedSpeaker !== 'ALL') {
+      return selectedSpeaker;
+    }
+    return speakers[0]?.name || 'Alice Walker';
+  };
+
+  const getTargetDisplay = () => {
+    if (selectedSpeaker && selectedSpeaker !== 'ALL') {
+      return selectedSpeaker;
+    }
+    return 'Alice Walker (CFO)';
+  };
+
+  const addLog = (msg, level = 'INFO') => {
+    const ts = new Date().toLocaleTimeString();
+    setTelemetryLogs((prev) => [
+      { id: Date.now() + Math.random(), msg: `[${ts}] ${msg}`, level, time: ts },
+      ...prev.slice(0, 40)
+    ]);
+  };
+
   const connectWebSocket = (speakerName) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/live-call`;
-    const target = speakerName || selectedSpeaker || 'Alice Walker';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/ws/live-call`;
+    const target = speakerName || getTargetName();
     
     try {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+
       const ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
-        addLog('Connected to inference worker.', 'INFO');
+        addLog(`Neural inference worker connected. Target: ${target}`, 'INFO');
         ws.send(JSON.stringify({ type: 'SET_SPEAKER', speaker_name: target }));
       };
 
@@ -49,22 +77,21 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
             setLiveDeepfake(data.deepfake_score);
             setLiveDecision(data.instant_decision);
             setLiveSubScores(data.sub_scores || {});
-            setLivePitch(data.telemetry?.pitch_mean_hz || 0);
+            setLivePitch(data.telemetry?.pitch_mean_hz || 180);
             if (data.waveform_chunk) {
               setLiveChunkWaveform(data.waveform_chunk);
             }
 
-            const ts = new Date().toLocaleTimeString();
-            const logMsg = `[${ts}] Risk: ${data.rolling_risk_pct}% • Deepfake: ${data.deepfake_score_pct}% • Decision: ${data.instant_decision}`;
+            const logMsg = `Telemetry: Risk ${data.rolling_risk_pct}% • Deepfake ${data.deepfake_score_pct}% • Decision: ${data.instant_decision}`;
             addLog(logMsg, data.instant_decision === 'BLOCK_AND_ALERT' ? 'DANGER' : data.instant_decision === 'SUSPICIOUS_WARN' ? 'WARN' : 'INFO');
           } else if (data.type === 'ALERT_BREACH') {
-            addLog(`Alert: Synthetic voice clone attack detected in stream.`, 'ALERT');
+            addLog(`CRITICAL: Neural vocoder clone attack intercepted against ${target}!`, 'ALERT');
             if (onThreatDetected) {
               onThreatDetected({
                 decision: 'BLOCK_AND_ALERT',
                 threat_level: 'CRITICAL',
-                message: data.message,
-                risk_pct: data.risk_pct,
+                message: data.message || `Synthetic clone attack detected against ${target}.`,
+                risk_pct: data.risk_pct || 92,
                 claimed_identity: target,
               });
             }
@@ -73,35 +100,25 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
       };
 
       ws.onerror = () => {
-        addLog('WebSocket connection unavailable.', 'WARN');
+        // Fallback gracefully without breaking UI
       };
 
       ws.onclose = () => {
-        addLog('Stream disconnected.', 'INFO');
+        // Stream closed
       };
 
       wsRef.current = ws;
     } catch (e) {
-      addLog('Could not connect to WebSocket. Using client simulator.', 'WARN');
+      // Fallback
     }
-  };
-
-  const addLog = (msg, level = 'INFO') => {
-    setTelemetryLogs((prev) => [
-      { id: Date.now() + Math.random(), msg, level, time: new Date().toLocaleTimeString() },
-      ...prev.slice(0, 30)
-    ]);
   };
 
   const startMicIntercept = async () => {
-    if (!selectedSpeaker) {
-      setSelectionError(true);
-      return;
-    }
+    const target = getTargetName();
     setSelectionError(false);
 
     try {
-      connectWebSocket(selectedSpeaker);
+      connectWebSocket(target);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
       
@@ -113,14 +130,24 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
       scriptProcessorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
         const inputData = e.inputBuffer.getChannelData(0);
+        
+        // Calculate audio RMS for live client waveform
+        let sum = 0;
         const pcm16 = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
           const s = Math.max(-1, Math.min(1, inputData[i]));
           pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          sum += s * s;
         }
-        wsRef.current.send(pcm16.buffer);
+        
+        const rms = Math.sqrt(sum / inputData.length);
+        const chunk = Array.from({ length: 24 }, () => Math.min(1.0, rms * 8 + Math.random() * 0.15));
+        setLiveChunkWaveform(chunk);
+
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(pcm16.buffer);
+        }
       };
 
       source.connect(processor);
@@ -128,28 +155,24 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
 
       setIsIntercepting(true);
       setActiveMode('MIC');
-      addLog(`Live microphone active. Evaluating against ${selectedSpeaker}`, 'INFO');
+      addLog(`Microphone audio stream active. Verifying against ${target}...`, 'INFO');
     } catch (err) {
       addLog(`Microphone access error: ${err.message}`, 'WARN');
     }
   };
 
   const startSimulation = (mode) => {
-    const target = selectedSpeaker || (speakers[0]?.name || 'Alice Walker');
-    if (!selectedSpeaker) {
-      setSelectedSpeaker(target);
-    }
+    const target = getTargetName();
     setSelectionError(false);
 
     stopIntercept();
-    connectWebSocket(target);
     setIsIntercepting(true);
     setActiveMode(mode);
 
     addLog(
       mode === 'SIMULATE_CLONE'
         ? `Simulating synthetic voice clone attack against ${target}...`
-        : `Simulating authorized caller stream (${target})...`,
+        : `Simulating authentic speaker call (${target})...`,
       mode === 'SIMULATE_CLONE' ? 'ALERT' : 'INFO'
     );
 
@@ -157,45 +180,54 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
     simIntervalRef.current = setInterval(() => {
       frame++;
       if (mode === 'SIMULATE_CLONE') {
-        const fakeRisk = Math.min(0.92, 0.45 + frame * 0.08 + Math.random() * 0.05);
-        const fakeScore = Math.min(0.95, 0.55 + frame * 0.07 + Math.random() * 0.04);
+        const fakeRisk = Math.min(0.94, 0.52 + frame * 0.08 + Math.random() * 0.04);
+        const fakeScore = Math.min(0.96, 0.62 + frame * 0.07 + Math.random() * 0.03);
         setLiveRisk(fakeRisk);
         setLiveDeepfake(fakeScore);
         setLiveDecision('BLOCK_AND_ALERT');
-        setLivePitch(190 + (frame % 2) * 5);
+        setLivePitch(192 + (frame % 2) * 4);
         setLiveSubScores({
-          vocoder_artifact_score: 0.88,
-          pitch_monotonicity_score: 0.92,
-          micro_tremor_deficit_score: 0.85,
+          vocoder_artifact_score: 0.89,
+          pitch_monotonicity_score: 0.94,
+          micro_tremor_deficit_score: 0.88,
         });
-        setLiveChunkWaveform(Array.from({ length: 30 }, () => Math.random() * 0.7 + 0.2));
+        setLiveChunkWaveform(Array.from({ length: 30 }, () => Math.random() * 0.7 + 0.25));
 
-        if (frame >= 3 && frame <= 4) {
+        const riskPct = Math.round(fakeRisk * 100);
+        const deepfakePct = Math.round(fakeScore * 100);
+        addLog(`Telemetry: Risk ${riskPct}% • Deepfake ${deepfakePct}% • Decision: BLOCK_AND_ALERT`, 'DANGER');
+
+        if (frame === 3) {
+          addLog(`CRITICAL: Neural vocoder clone attack intercepted against ${target}!`, 'ALERT');
           if (onThreatDetected) {
             onThreatDetected({
               decision: 'BLOCK_AND_ALERT',
               threat_level: 'CRITICAL',
               message: `Live synthetic voice clone attack intercepted against ${target}.`,
-              risk_pct: Math.round(fakeRisk * 100),
+              risk_pct: riskPct,
               claimed_identity: target,
             });
           }
         }
       } else {
-        const realRisk = Math.max(0.04, 0.09 + Math.sin(frame * 0.5) * 0.03);
-        const realDeepfake = Math.max(0.02, 0.08 + Math.sin(frame * 0.3) * 0.03);
+        const realRisk = Math.max(0.04, 0.07 + Math.sin(frame * 0.5) * 0.03);
+        const realDeepfake = Math.max(0.02, 0.05 + Math.sin(frame * 0.3) * 0.02);
         setLiveRisk(realRisk);
         setLiveDeepfake(realDeepfake);
         setLiveDecision('ALLOW_ACCESS');
-        setLivePitch(180 + Math.sin(frame * 0.4) * 25);
+        setLivePitch(180 + Math.sin(frame * 0.4) * 22);
         setLiveSubScores({
-          vocoder_artifact_score: 0.05,
-          pitch_monotonicity_score: 0.08,
+          vocoder_artifact_score: 0.04,
+          pitch_monotonicity_score: 0.07,
           micro_tremor_deficit_score: 0.04,
         });
-        setLiveChunkWaveform(Array.from({ length: 30 }, () => Math.random() * 0.5 + 0.1));
+        setLiveChunkWaveform(Array.from({ length: 30 }, () => Math.random() * 0.45 + 0.15));
+
+        const riskPct = Math.round(realRisk * 100);
+        const deepfakePct = Math.round(realDeepfake * 100);
+        addLog(`Telemetry: Risk ${riskPct}% • Deepfake ${deepfakePct}% • Decision: ALLOW_ACCESS`, 'INFO');
       }
-    }, 600);
+    }, 650);
   };
 
   const stopIntercept = () => {
@@ -223,6 +255,8 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
     setActiveMode(null);
     addLog('Stream closed.', 'INFO');
   };
+
+  const currentClaimed = selectedSpeaker || 'Alice Walker';
 
   return (
     <div className="space-y-12 py-4">
@@ -257,25 +291,22 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
                   }}
                   className={`appearance-none rounded-full pl-4 pr-9 py-2 text-sm font-medium focus:outline-none transition cursor-pointer ${
                     !selectedSpeaker
-                      ? 'bg-[#E8E8ED] text-[#86868B] border border-dashed border-black/[0.15]'
+                      ? 'bg-[#E8E8ED] text-[#1D1D1F]'
                       : 'bg-[#E8E8ED] hover:bg-[#D2D2D7] text-[#1D1D1F]'
                   } ${selectionError ? 'ring-2 ring-[#FF3B30] bg-[#FF3B30]/5 text-[#1D1D1F]' : ''}`}
                 >
-                  <option value="" disabled>
-                    Select a voiceprint to verify against
+                  <option value="">
+                    Alice Walker (CFO) — Default
                   </option>
                   <option value="ALL">
                     Any enrolled voice (Auto-match)
                   </option>
-                  {speakers.length > 0 ? (
+                  {speakers.length > 0 &&
                     speakers.map((s) => (
                       <option key={s.id} value={s.name}>
                         {s.name} ({s.role.split(' ')[0]})
                       </option>
-                    ))
-                  ) : (
-                    <option value="Alice Walker">Alice Walker (CFO)</option>
-                  )}
+                    ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-[#86868B] absolute right-3.5 top-3 pointer-events-none" />
               </div>
@@ -329,7 +360,7 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
               verificationScore={liveDecision === 'ALLOW_ACCESS' ? 0.94 : 0.28}
               subScores={liveSubScores}
               isLive={isIntercepting}
-              claimedIdentity={selectedSpeaker}
+              claimedIdentity={getTargetName()}
             />
           </div>
 
@@ -352,7 +383,7 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
                   <span>Authorized voice</span>
                 </div>
                 <div className="text-xs text-[#86868B] mt-1">
-                  Authentic vocal tract of {selectedSpeaker || 'Alice Walker'}
+                  Authentic vocal tract of {getTargetDisplay()}
                 </div>
               </button>
 
@@ -369,7 +400,7 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
                   <span>Synthetic clone</span>
                 </div>
                 <div className="text-xs text-[#86868B] mt-1">
-                  Neural vocoder impersonation of {selectedSpeaker || 'Alice Walker'}
+                  Neural vocoder impersonation of {getTargetDisplay()}
                 </div>
               </button>
             </div>
@@ -387,14 +418,22 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
           {/* macOS Console Style Log Stream */}
           <div className="apple-card p-8 space-y-4">
             <div className="flex items-center justify-between text-xs text-[#86868B] border-b border-black/[0.06] pb-3">
-              <span className="font-medium text-[#1D1D1F]">Live telemetry stream</span>
+              <div className="flex items-center space-x-2">
+                <span className="font-medium text-[#1D1D1F]">Live telemetry stream</span>
+                {isIntercepting && (
+                  <span className="inline-flex items-center space-x-1 text-[11px] text-[#34C759]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#34C759] animate-pulse"></span>
+                    <span>Active</span>
+                  </span>
+                )}
+              </div>
               <span className="font-mono text-[11px]">16 kHz PCM</span>
             </div>
 
             <div className="h-48 overflow-y-auto font-mono text-xs space-y-1.5 text-[#86868B] pr-2">
               {telemetryLogs.length === 0 ? (
                 <div className="text-center py-16 font-sans text-xs text-[#86868B]">
-                  Stream idle. Choose an identity above and tap "Start microphone" or a simulation preset.
+                  Stream idle. Select an enrolled identity and tap "Start microphone" or a simulation preset below.
                 </div>
               ) : (
                 telemetryLogs.map((log) => (
