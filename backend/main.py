@@ -28,6 +28,12 @@ from backend.pipeline.stage4_risk_engine import RiskDecisionEngine
 from backend.pipeline.blockchain_ledger import BlockchainAuditLedger
 from backend.sample_audio_generator import generate_sample_audio_files
 
+try:
+    import torch
+    torch.set_num_threads(1)
+except Exception:
+    pass
+
 # Initialize FastAPI App
 app = FastAPI(
     title="Deadlock — AI Voice Cloning Detector & Biometric Cyber-Defense",
@@ -35,7 +41,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS for Next.js Frontend
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,6 +49,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "service": "deadlock-voice-defense"}
 
 # Instantiate Pipeline Stages
 preprocessor = AudioPreprocessor(target_sr=16000)
