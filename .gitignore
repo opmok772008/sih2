@@ -6,7 +6,5 @@ __pycache__/
 *.pyo
 .DS_Store
 .env
-dist/
-build/
 deadlock_security.db
 sample_audios/
