@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 import datetime
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from sqlalchemy.orm import Session
 from backend.models.database import BlockchainBlock
 
