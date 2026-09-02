@@ -11,7 +11,7 @@ try:
     import librosa
     import soundfile as sf
     HAS_LIBROSA = True
-except ImportError:
+except Exception:
     HAS_LIBROSA = False
 
 
