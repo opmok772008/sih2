@@ -138,8 +138,6 @@ class SpeakerVerificationEngine:
         euclidean_dist = float(np.sqrt(max(0.0, 2.0 - 2.0 * cos_sim)))
         
         # Calibrated verification confidence score (0.0 to 1.0)
-        # Cosine similarity for different speakers is typically ~0.2-0.5, same speaker is ~0.75-0.98
-        # Sigmoidal mapping centered around threshold 0.65
         calibrated_score = 1.0 / (1.0 + math.exp(-12.0 * (cos_sim - 0.60)))
         calibrated_score = max(0.01, min(0.99, calibrated_score))
         
@@ -153,6 +151,10 @@ class SpeakerVerificationEngine:
             "threshold_used": self.match_threshold,
             "match_grade": "VERIFIED_SPEAKER" if is_matched else ("MARGINAL_MATCH" if cos_sim >= 0.55 else "SPEAKER_MISMATCH")
         }
+
+    def verify(self, emb_query: List[float], emb_target: List[float]) -> Dict[str, Any]:
+        """Alias for compare_embeddings."""
+        return self.compare_embeddings(emb_query, emb_target)
 
     def generate_radar_profile(self, embedding: List[float]) -> Dict[str, float]:
         """

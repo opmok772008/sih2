@@ -213,37 +213,7 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
         });
         setLiveChunkWaveform(chunk);
 
-        // 4. Client-side real-time acoustic stats reaction when user speaks
-        if (rms > 0.015) {
-          const pitchHistory = pitchHistoryRef.current;
-          const pitchMean = pitchHistory.length > 0 ? pitchHistory.reduce((a, b) => a + b, 0) / pitchHistory.length : 185;
-          const pitchVariance = pitchHistory.length > 1 
-            ? Math.sqrt(pitchHistory.map(x => Math.pow(x - pitchMean, 2)).reduce((a, b) => a + b) / pitchHistory.length) 
-            : 8;
-
-          // Compute acoustic indicators
-          const naturalJitter = Math.min(0.12, Math.max(0.02, (pitchVariance / 80) + (rms * 0.04)));
-          const vocoderScore = Math.max(0.02, Math.min(0.15, zcr * 0.3));
-          const naturalTremor = Math.min(0.08, Math.max(0.02, 0.04 + Math.sin(frameCountRef.current * 0.3) * 0.02));
-
-          // Voiceprint match against target (Alice Walker target F0 ~ 185 Hz)
-          const f0Diff = Math.abs(pitchMean - 185);
-          const dynamicMatch = Math.min(0.98, Math.max(0.72, 0.95 - (f0Diff / 350) + (rms * 0.08)));
-          const dynamicDeepfake = Math.max(0.02, Math.min(0.18, vocoderScore + (1 - dynamicMatch) * 0.1));
-          const dynamicRisk = Math.max(0.04, Math.min(0.22, 0.5 * dynamicDeepfake + 0.35 * (1 - dynamicMatch) + 0.15 * naturalJitter));
-
-          setLiveVerifyMatch(parseFloat(dynamicMatch.toFixed(2)));
-          setLiveDeepfake(parseFloat(dynamicDeepfake.toFixed(2)));
-          setLiveRisk(parseFloat(dynamicRisk.toFixed(2)));
-          setLiveDecision('ALLOW_ACCESS');
-          setLiveSubScores({
-            vocoder_artifact_score: parseFloat(vocoderScore.toFixed(2)),
-            pitch_monotonicity_score: parseFloat(naturalJitter.toFixed(2)),
-            micro_tremor_deficit_score: parseFloat(naturalTremor.toFixed(2)),
-          });
-        }
-
-        // 5. Send audio chunk to backend WebSocket for deep PyTorch analysis
+        // 4. Send live PCM audio chunk to backend WebSocket for deep neural & forensic analysis
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(pcm16.buffer);
         }

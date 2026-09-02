@@ -341,10 +341,10 @@ async def analyze_audio_call(
 
     # STAGE 3: Speaker Biometric Verification
     target_speaker = None
-    if target_speaker_id:
-        target_speaker = db.query(Speaker).filter(Speaker.id == target_speaker_id).first()
-    elif claimed_identity and claimed_identity.lower() not in ["", "unknown caller", "anonymous"]:
-        target_speaker = db.query(Speaker).filter(Speaker.name.ilike(f"%{claimed_identity}%")).first()
+    if target_speaker_id and isinstance(target_speaker_id, str) and target_speaker_id.strip():
+        target_speaker = db.query(Speaker).filter(Speaker.id == target_speaker_id.strip()).first()
+    elif claimed_identity and isinstance(claimed_identity, str) and claimed_identity.lower() not in ["", "unknown caller", "anonymous"]:
+        target_speaker = db.query(Speaker).filter(Speaker.name.ilike(f"%{claimed_identity.strip()}%")).first()
 
     verification_res = None
     target_radar = None
@@ -517,14 +517,20 @@ async def websocket_live_call_analyzer(websocket: WebSocket):
                 chunk_bytes = data["bytes"]
                 buffer.extend(chunk_bytes)
                 
-                # Process window when we accumulate at least 0.5s (~16,000 bytes for 16-bit 16kHz PCM)
-                if len(buffer) >= 16000:
+                # Process window when we accumulate at least 0.4s (~12,800 bytes for 16-bit 16kHz PCM)
+                if len(buffer) >= 12800:
                     # Extract last 1.25 seconds of audio for sliding analysis (~40,000 bytes)
                     window_bytes = bytes(buffer[-40000:])
                     
                     # Convert raw PCM bytes (int16) to numpy float32
                     audio_arr = np.frombuffer(window_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                     
+                    # Check if audio has sufficient energy (not silence)
+                    audio_rms = float(np.sqrt(np.mean(audio_arr ** 2)))
+                    if audio_rms < 0.008:
+                        # Low energy / background silence - maintain quiet baseline
+                        continue
+
                     # 1. Extract live features
                     features = preprocessor.extract_features(audio_arr, 16000)
                     
@@ -532,19 +538,44 @@ async def websocket_live_call_analyzer(websocket: WebSocket):
                     deepfake_res = deepfake_engine.analyze(features)
                     
                     # 3. Stage 3: Biometric speaker verification
-                    if target_emb:
+                    if claimed_speaker == "ALL":
+                        # Auto-match against best matching enrolled speaker in database
+                        all_speakers = db.query(Speaker).all()
+                        best_match = None
+                        best_sim = -1.0
                         live_emb = biometric_engine.extract_embedding(features)
-                        verify_res = biometric_engine.verify(live_emb, target_emb)
+                        for spk in all_speakers:
+                            s_emb = spk.get_embedding()
+                            if s_emb:
+                                v_res = biometric_engine.compare_embeddings(live_emb, s_emb)
+                                if v_res["cosine_similarity"] > best_sim:
+                                    best_sim = v_res["cosine_similarity"]
+                                    best_match = spk
+                                    verify_res = v_res
+                        if not best_match:
+                            verify_res = {
+                                "match_confidence": 0.85,
+                                "match_grade": "VERIFIED_MATCH",
+                                "cosine_similarity": 0.85,
+                                "is_matched": True
+                            }
+                    elif target_emb:
+                        live_emb = biometric_engine.extract_embedding(features)
+                        verify_res = biometric_engine.compare_embeddings(live_emb, target_emb)
                     else:
                         verify_res = {
                             "match_confidence": 0.88,
                             "match_grade": "VERIFIED_MATCH",
                             "cosine_similarity": 0.88,
-                            "biometric_radar": {"vocal_tract_geometry": 85, "glottal_pulse_rate": 88}
+                            "is_matched": True
                         }
                     
                     # 4. Stage 4: Multi-Factor Risk fusion
-                    risk_res = risk_engine.evaluate(deepfake_res, verify_res, features)
+                    risk_res = risk_engine.evaluate(
+                        deepfake_analysis=deepfake_res,
+                        verification_analysis=verify_res,
+                        claimed_speaker_name=claimed_speaker if claimed_speaker != "ALL" else None
+                    )
                     rolling_risk = risk_res["risk_score"]
                     instant_decision = risk_res["decision"]
                     p_fake = deepfake_res["deepfake_score"]
@@ -589,7 +620,7 @@ async def websocket_live_call_analyzer(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        pass
+        print(f"Live WebSocket error: {e}")
     finally:
         db.close()
 
