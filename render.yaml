@@ -7,9 +7,7 @@ services:
     branch: main
     buildCommand: "bash build.sh"
     startCommand: "python run.py"
-    healthCheckPath: /api/status
+    healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: PORT
-        value: 10000
