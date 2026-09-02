@@ -53,8 +53,8 @@ class RiskDecisionEngine:
             self.w_anomaly * p_anomaly
         )
         
-        # Attack amplification rule: If deepfake score > 0.65 or (claimed identity + biometric mismatch + moderate deepfake)
-        if p_fake >= 0.65:
+        # Attack amplification rule: If deepfake score > 0.55
+        if p_fake >= 0.55:
             composite_risk = max(composite_risk, 0.85)
         elif has_claimed_identity and not is_matched and p_fake > 0.40:
             composite_risk = max(composite_risk, 0.78)
@@ -63,31 +63,39 @@ class RiskDecisionEngine:
 
         # Decision Threshold Classifier
         threat_vectors = []
-        if p_fake >= 0.60:
+        if p_fake >= 0.55:
             threat_vectors.append("SYNTHETIC_VOICE_CLONE_ATTACK")
         if has_claimed_identity and not is_matched:
             threat_vectors.append("SPEAKER_IMPERSONATION_MISMATCH")
-        if p_anomaly >= 0.60:
+        if p_anomaly >= 0.55:
             threat_vectors.append("VOCODER_SPECTRAL_ARTIFACTS")
 
-        if composite_risk >= self.thresh_block or p_fake >= 0.65:
+        # Clear, mutually exclusive security verdict classification
+        if p_fake >= 0.55 or (composite_risk >= self.thresh_block and p_fake >= 0.35):
             decision = "BLOCK_AND_ALERT"
             threat_level = "CRITICAL"
             badge_color = "red"
             action = "TERMINATE_CALL_IMMEDIATELY"
             recommendation = (
-                "Critical Security Breach: Active AI voice cloning / impersonation attack detected. "
-                "The incoming audio stream has been intercepted and blocked. Cryptographic incident recorded."
+                "Critical Security Breach: Active AI voice cloning / synthetic speech attack intercepted. "
+                "Neural vocoder artifacts detected. The incoming audio stream has been blocked."
             )
-        elif composite_risk >= self.thresh_safe or (has_claimed_identity and not is_matched):
+        elif (has_claimed_identity and not is_matched) or composite_risk >= self.thresh_safe or p_fake >= 0.30:
             decision = "SUSPICIOUS_WARN"
             threat_level = "ELEVATED"
             badge_color = "amber"
             action = "REQUIRE_STEP_UP_AUTH"
-            recommendation = (
-                "Elevated Risk: Anomalies detected in acoustic features or speaker biometric match is inconclusive. "
-                "Require secondary out-of-band MFA or step-up voice challenge phrase before granting authorization."
-            )
+            if p_fake < 0.30 and has_claimed_identity and not is_matched:
+                recommendation = (
+                    f"Biometric Voice Mismatch: Audio is verified as authentic biological human speech, "
+                    f"but voiceprint characteristics diverge from the enrolled profile of {claimed_speaker_name}. "
+                    "Require secondary verification or step-up authentication."
+                )
+            else:
+                recommendation = (
+                    "Elevated Risk: Acoustic divergence or moderate synthetic anomalies detected. "
+                    "Require secondary out-of-band MFA before granting authorization."
+                )
         else:
             decision = "ALLOW_ACCESS"
             threat_level = "LOW"
@@ -98,10 +106,9 @@ class RiskDecisionEngine:
                 "with matching biometric voiceprint parameters."
             )
 
-        # Generate simulated Multi-Channel Alert Payload
         alert_payload = {
-            "alert_id": f"ALT-{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "alert_id": f"ALT-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "decision": decision,
             "threat_level": threat_level,
             "composite_risk_pct": round(composite_risk * 100, 1),
