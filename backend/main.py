@@ -110,9 +110,11 @@ def on_startup():
                 event_type="VOICEPRINT_ENROLLMENT",
                 decision="ENROLLMENT_VERIFIED",
                 risk_score=0.04,
-                deepfake_score=0.02,
-                match_confidence=0.99,
-                audio_meta={"enrollment_type": "AUTHENTIC_BIOMETRIC_PROFILE"}
+                payload_dict={
+                    "deepfake_score": 0.02,
+                    "match_confidence": 0.99,
+                    "audio_meta": {"enrollment_type": "AUTHENTIC_BIOMETRIC_PROFILE"}
+                }
             )
             print("Instant enrollment seeded for Alice Walker.")
     except Exception as e:

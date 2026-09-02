@@ -77,21 +77,26 @@ class BlockchainAuditLedger:
         claimed_identity: str,
         event_type: str,
         decision: str,
-        risk_score: float,
-        payload_dict: Dict[str, Any]
+        risk_score: float = 0.0,
+        payload_dict: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> BlockchainBlock:
         """
         Create a new cryptographically chained block for a call or enrollment event.
         """
         cls.ensure_genesis_block(db)
         
+        combined_payload = dict(payload_dict or {})
+        if kwargs:
+            combined_payload.update(kwargs)
+            
         # Get latest block
         latest_block = db.query(BlockchainBlock).order_by(BlockchainBlock.index.desc()).first()
         prev_hash = latest_block.block_hash if latest_block else "0" * 64
         new_index = (latest_block.index + 1) if latest_block else 0
         
         ts = datetime.datetime.utcnow()
-        data_hash = cls.compute_sha256(json.dumps(payload_dict, sort_keys=True, default=str))
+        data_hash = cls.compute_sha256(json.dumps(combined_payload, sort_keys=True, default=str))
         block_header = f"{new_index}:{ts.isoformat()}:{prev_hash}:{data_hash}"
         block_hash = cls.compute_sha256(block_header)
         signature = cls.compute_hmac(block_hash)
