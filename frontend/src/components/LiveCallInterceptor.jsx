@@ -45,7 +45,7 @@ function detectPitchF0(buffer, sampleRate = 16000) {
 export default function LiveCallInterceptor({ speakers = [], onThreatDetected }) {
   const [isIntercepting, setIsIntercepting] = useState(false);
   const [activeMode, setActiveMode] = useState(null);
-  const [selectedSpeaker, setSelectedSpeaker] = useState('');
+  const [selectedSpeaker, setSelectedSpeaker] = useState('ALL');
   const [selectionError, setSelectionError] = useState(false);
   
   // Real-time dynamic telemetry state (reacts continuously to microphone audio)
@@ -368,18 +368,20 @@ export default function LiveCallInterceptor({ speakers = [], onThreatDetected })
                       : 'bg-[#E8E8ED] hover:bg-[#D2D2D7] text-[#1D1D1F]'
                   } ${selectionError ? 'ring-2 ring-[#FF3B30] bg-[#FF3B30]/5 text-[#1D1D1F]' : ''}`}
                 >
-                  <option value="">
-                    Alice Walker (CFO) — Default
-                  </option>
                   <option value="ALL">
-                    Any enrolled voice (Auto-match)
+                    Auto-Detect / General Voice Mode
+                  </option>
+                  <option value="Alice Walker">
+                    Alice Walker (CFO) — Biometric Verification
                   </option>
                   {speakers.length > 0 &&
-                    speakers.map((s) => (
-                      <option key={s.id} value={s.name}>
-                        {s.name} ({s.role.split(' ')[0]})
-                      </option>
-                    ))}
+                    speakers
+                      .filter((s) => s.name !== "Alice Walker")
+                      .map((s) => (
+                        <option key={s.id} value={s.name}>
+                          {s.name} ({s.role.split(' ')[0]}) — Biometric Verification
+                        </option>
+                      ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-[#86868B] absolute right-3.5 top-3 pointer-events-none" />
               </div>

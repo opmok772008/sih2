@@ -52,11 +52,11 @@ export default function RiskGauge({
           </div>
         ) : (
           <div>
-            <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[#1D1D1F] leading-tight">
-              Voice verified.
+            <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[#34C759] leading-tight">
+              Authentic voice verified.
             </h2>
             <p className="text-[#86868B] text-base sm:text-lg mt-2 leading-relaxed font-normal max-w-xl">
-              Natural vocal cadence confirmed. Voiceprint matches {targetName} with high confidence.
+              Natural biological vocal cadence confirmed. Zero synthetic vocoder artifacts detected in audio stream.
             </p>
           </div>
         )}
