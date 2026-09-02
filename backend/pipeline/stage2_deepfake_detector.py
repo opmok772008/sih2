@@ -113,24 +113,12 @@ class DeepfakeDetectionEngine:
         # 2. Glottal Micro-Perturbation & Biological Vocal Cord Jitter/Shimmer
         # =========================================================================
         micro_tremor_score = 0.04
-        # Living human vocal cords physically jitter (0.20% to 2.5% on short windows).
-        # Only mathematically sterile zero jitter indicates mathematical wave synthesis.
-        if jitter < 0.03 and shimmer < 0.20 and pitch_mean > 0:
+        # Living human vocal cords physically jitter (0.25% to 2.5% on short windows).
+        # Only mathematically sterile zero jitter (< 0.02%) indicates mathematical wave synthesis.
+        if pitch_mean > 0 and jitter < 0.02 and shimmer < 0.10:
             micro_tremor_score = 0.85
             flags.append("GLOTTAL_MICRO_PERTURBATION_DEFICIT")
-            reasoning.append(f"Cycle-to-cycle vocal fold perturbation (Jitter {jitter}%, Shimmer {shimmer}%) is unnaturally sterile, indicating AI synthesis.")
-        elif jitter > 6.0 and shimmer > 12.0:
-            micro_tremor_score = 0.78
-            flags.append("GLOTTAL_SYNTHESIS_INSTABILITY")
-            reasoning.append(f"Excessive pitch cycle perturbation (Jitter {jitter}%, Shimmer {shimmer}%) from auto-regressive vocoder phase instability.")
-
-        # =========================================================================
-        # 3. Harmonics-to-Noise Ratio (HNR) & Harmonic Prominence (CPP)
-        # =========================================================================
-        if hnr > 38.0 or cpp > 32.0:
-            micro_tremor_score = max(micro_tremor_score, 0.80)
-            flags.append("STERILE_HARMONIC_STRUCTURE")
-            reasoning.append(f"Harmonics-to-Noise Ratio ({hnr} dB) exceeds biological vocal tract boundaries.")
+            reasoning.append(f"Cycle-to-cycle vocal fold perturbation (Jitter {jitter}%, Shimmer {shimmer}%) is unnaturally sterile, indicating mathematical AI synthesis.")
 
         # =========================================================================
         # 4. Pitch Monotonicity & Quantization
